@@ -1,66 +1,100 @@
-## Foundry
+# GaslessCart
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+**Frictionless Web3 E-commerce via Account Abstraction (ERC-4337) principles.**
 
-Foundry consists of:
+GaslessCart is a complete end-to-end decentralized application (dApp) built on the Base network. It enables e-commerce storefronts to accept USDC payments without forcing the consumer to hold native gas tokens (ETH) or understand blockchain mechanics. 
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+By utilizing off-chain cryptographic signatures and an on-chain Paymaster architecture, the protocol abstracts away network fees and provides a seamless, Web2-like checkout experience.
 
-## Documentation
+---
 
-https://book.getfoundry.sh/
+## System Architecture
 
-## Usage
+The project consists of three core layers working in tandem:
 
-### Build
+1. **Smart Contracts (Solidity/Foundry):**
+   - `MockUSDC.sol`: An ERC-20 stablecoin representation.
+   - `GaslessCartPaymaster.sol`: The core settlement engine. It verifies EIP-712 cryptographic signatures, transfers the product cost to the merchant, and reimburses the relayer for the gas spent.
+2. **Off-Chain Relayer (Node.js/Viem):**
+   - A secure backend environment (`interact.js`) that validates user intents and countersigns payload hashes to prevent unauthorized smart contract execution.
+3. **Frontend Storefront (Next.js/React):**
+   - A consumer-facing UI simulating an e-commerce checkout. It handles state management, local signature generation, and live network event logging.
 
-```shell
-$ forge build
+---
+
+## Technology Stack
+
+* **Network:** Base (Optimism L2 Stack)
+* **Smart Contracts:** Solidity `^0.8.20`, OpenZeppelin Contracts
+* **Development Framework:** Foundry (Rust-based EVM toolkit)
+* **Frontend:** Next.js (App Router), TailwindCSS
+* **Web3 Integration:** Viem, Viem/accounts
+* **Security:** `dotenv` for localized key management
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/en/) (v18+ LTS)
+- [Foundry](https://getfoundry.sh/) (Forge, Cast, Anvil)
+- Git
+
+### 1. Installation
+
+```bash
+git clone [https://github.com/YOUR_USERNAME/GaslessCart.git](https://github.com/YOUR_USERNAME/GaslessCart.git)
+cd GaslessCart
+forge install
+npm install
+cd frontend
+npm install
+cd ..
 ```
 
-### Test
+### 2. Environment Setup
 
-```shell
-$ forge test
+```bash
+touch .env
 ```
 
-### Format
-
-```shell
-$ forge fmt
+```env
+USER_PRIVATE_KEY=0xYourUserPrivateKeyHere
+SIGNER_PRIVATE_KEY=0xYourBackendSignerPrivateKeyHere
 ```
 
-### Gas Snapshots
+### 3. Running the Test Suite
 
-```shell
-$ forge snapshot
+```bash
+forge test -vvv
 ```
 
-### Anvil
+### 4. Running the Relayer Script
 
-```shell
-$ anvil
+```bash
+node interact.js
 ```
 
-### Deploy
+### 5. Launching the Frontend Storefront
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+```bash
+cd frontend
+npm run dev
 ```
 
-### Cast
+---
 
-```shell
-$ cast <subcommand>
-```
+## Security Considerations
 
-### Help
+* **Replay Attacks:** The `GaslessCartPaymaster` utilizes a strictly incrementing `nonce` mapping per user address to completely neutralize replay attacks.
+* **Backend Authorization:** Transactions are gated by a `require(signer == verifyingSigner)` constraint, ensuring only payloads verified by the proprietary backend can be settled on-chain.
 
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+---
+
+## Roadmap & Future Improvements
+
+- [ ] Upgrade standard `transferFrom` logic to **ERC-20 Permit (EIP-2612)** for true zero-gas initial approvals.
+- [ ] Refactor the custom Paymaster into a fully compliant **ERC-4337 EntryPoint** module.
+- [ ] Integrate a live dynamic gas-pricing API into the relayer script.
+- [ ] Add WalletConnect or Privy to the Next.js frontend for real wallet interactions.
