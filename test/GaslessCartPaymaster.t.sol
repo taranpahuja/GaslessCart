@@ -9,7 +9,6 @@ contract GaslessCartPaymasterTest is Test {
     MockUSDC public usdc;
     GaslessCartPaymaster public paymaster;
 
-    // Simulate cryptographic keys for actors
     uint256 public signerPrivateKey = 0xA11CE;
     uint256 public userPrivateKey = 0xB0B;
 
@@ -21,23 +20,24 @@ contract GaslessCartPaymasterTest is Test {
         verifyingSigner = vm.addr(signerPrivateKey);
         user = vm.addr(userPrivateKey);
 
-        // Deploy contracts locally
         usdc = new MockUSDC();
         paymaster = new GaslessCartPaymaster(address(usdc), verifyingSigner);
 
-        // Distribute tokens to user and grant allowance permissions
         usdc.publicMint(user, 500 * 10 ** 18);
 
-        vm.prank(user);
-        usdc.approve(address(paymaster), type(uint256).max);
+        // Notice we removed usdc.approve() here.
+        // We are testing true zero-gas initializations now.
     }
 
-    function testSuccessfulGaslessPurchase() public {
+    function testSuccessfulGaslessPurchaseWithPermit() public {
         uint256 purchaseAmount = 100 * 10 ** 18;
-        uint256 feeAmount = 2 * 10 ** 18; // $2 gas fee compensation
+        uint256 feeAmount = 2 * 10 ** 18;
+        uint256 totalAmountNeeded = purchaseAmount + feeAmount;
         uint256 currentNonce = paymaster.nonces(user);
 
-        // Compute the structural hash
+        // ------------------------------------------------------------------
+        // STEP 1: Generate the Backend Authorization Signature
+        // ------------------------------------------------------------------
         bytes32 messageHash = keccak256(
             abi.encodePacked(
                 user,
@@ -52,25 +52,78 @@ contract GaslessCartPaymasterTest is Test {
             abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
         );
 
-        // Sign payload using the trusted backend signer key
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
+        (uint8 backendV, bytes32 backendR, bytes32 backendS) = vm.sign(
             signerPrivateKey,
             ethSignedMessageHash
         );
-        bytes memory signature = abi.encodePacked(r, s, v);
+        bytes memory backendSignature = abi.encodePacked(
+            backendR,
+            backendS,
+            backendV
+        );
 
-        // Any third party executor (e.g., our relayer) runs the transaction paying the gas
+        // ------------------------------------------------------------------
+        // STEP 2: Generate the User's EIP-2612 Permit Signature
+        // ------------------------------------------------------------------
+        uint256 permitDeadline = block.timestamp + 1 hours;
+        uint256 tokenNonce = usdc.nonces(user);
+
+        // A. Hash the permit variables exactly as the ERC-20 standard expects
+        bytes32 permitStructHash = keccak256(
+            abi.encode(
+                keccak256(
+                    "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+                ),
+                user,
+                address(paymaster),
+                totalAmountNeeded,
+                tokenNonce,
+                permitDeadline
+            )
+        );
+
+        // B. Bind the struct hash to the USDC contract's unique Domain Separator
+        bytes32 permitHash = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                usdc.DOMAIN_SEPARATOR(),
+                permitStructHash
+            )
+        );
+
+        // C. The user signs the permit hash
+        (uint8 permitV, bytes32 permitR, bytes32 permitS) = vm.sign(
+            userPrivateKey,
+            permitHash
+        );
+
+        // D. Package the signature into our custom struct
+        GaslessCartPaymaster.PermitData memory permitData = GaslessCartPaymaster
+            .PermitData({
+                deadline: permitDeadline,
+                v: permitV,
+                r: permitR,
+                s: permitS
+            });
+
+        // ------------------------------------------------------------------
+        // STEP 3: Execute as Relayer (Passing all 6 arguments)
+        // ------------------------------------------------------------------
         address relayer = address(0x9);
         vm.prank(relayer);
+
         paymaster.executeGaslessPurchase(
             user,
             merchant,
             purchaseAmount,
             feeAmount,
-            signature
+            backendSignature,
+            permitData
         );
 
-        // Verify accurate ledger updates
+        // ------------------------------------------------------------------
+        // STEP 4: Assert State Changes
+        // ------------------------------------------------------------------
         assertEq(usdc.balanceOf(merchant), purchaseAmount);
         assertEq(usdc.balanceOf(address(paymaster)), feeAmount);
         assertEq(paymaster.nonces(user), currentNonce + 1);
