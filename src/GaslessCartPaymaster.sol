@@ -15,12 +15,7 @@ contract GaslessCartPaymaster {
 
     mapping(address => uint256) public nonces;
 
-    event PaymentProcessed(
-        address indexed user,
-        address indexed merchant,
-        uint256 amount,
-        uint256 executionFee
-    );
+    event PaymentProcessed(address indexed user, address indexed merchant, uint256 amount, uint256 executionFee);
 
     // Structure to neatly package the EIP-2612 Permit signature parameters
     struct PermitData {
@@ -57,44 +52,21 @@ contract GaslessCartPaymaster {
 
         // 2. Consume the user's Permit signature to grant this contract allowance
         // This is where the magic happens: Zero-gas approval!
-        IERC20Permit(address(stablecoin)).permit(
-            user,
-            address(this),
-            totalAmountNeeded,
-            permit.deadline,
-            permit.v,
-            permit.r,
-            permit.s
-        );
+        IERC20Permit(address(stablecoin))
+            .permit(user, address(this), totalAmountNeeded, permit.deadline, permit.v, permit.r, permit.s);
 
         // 3. Verify the Backend Authorization Signature (same as MVP)
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(
-                user,
-                merchant,
-                amount,
-                executionFee,
-                nonces[user],
-                block.chainid
-            )
-        );
-        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(
-            messageHash
-        );
+        bytes32 messageHash =
+            keccak256(abi.encodePacked(user, merchant, amount, executionFee, nonces[user], block.chainid));
+        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         address signer = ethSignedMessageHash.recover(backendSignature);
         require(signer == verifyingSigner, "Invalid backend signature");
 
         nonces[user]++;
 
         // 4. Settle the funds
-        require(
-            stablecoin.transferFrom(user, merchant, amount),
-            "Merchant settlement failed"
-        );
-        require(
-            stablecoin.transferFrom(user, address(this), executionFee),
-            "Gas reimbursement failed"
-        );
+        require(stablecoin.transferFrom(user, merchant, amount), "Merchant settlement failed");
+        require(stablecoin.transferFrom(user, address(this), executionFee), "Gas reimbursement failed");
 
         emit PaymentProcessed(user, merchant, amount, executionFee);
     }
